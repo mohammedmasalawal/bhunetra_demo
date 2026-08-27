@@ -2,12 +2,38 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as api from "./api";
-import type { AlertFeature, AlertStatus, AuditLogEntry, Site } from "./types";
+import type { AlertFeature, AlertStatus, Aoi, AuditLogEntry, Site } from "./types";
 import { useAuth } from "./auth";
+
+const AOI_PARAM = "aoi";
+
+function initialAoi(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return new URLSearchParams(window.location.search).get(AOI_PARAM);
+  } catch {
+    return null;
+  }
+}
+
+function syncAoiToUrl(aoi: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    const url = new URL(window.location.href);
+    if (aoi) url.searchParams.set(AOI_PARAM, aoi);
+    else url.searchParams.delete(AOI_PARAM);
+    window.history.replaceState(null, "", url.toString());
+  } catch {
+    /* no-op */
+  }
+}
 
 export function useDashboard() {
   const { session } = useAuth();
   const token = session?.token ?? null;
+
+  const [aois, setAois] = useState<Aoi[]>([]);
+  const [selectedAoi, setSelectedAoiState] = useState<string | null>(initialAoi);
 
   const [alerts, setAlerts] = useState<AlertFeature[] | null>(null);
   const [sites, setSites] = useState<Site[] | null>(null);
@@ -16,24 +42,10 @@ export function useDashboard() {
   const [auditLoading, setAuditLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [alertsRes, sitesRes, auditRes] = await Promise.all([
-        api.getAlerts(token ?? ""),
-        api.getSites(token ?? ""),
-        api.getAuditLogs(token ?? ""),
-      ]);
-      setAlerts(alertsRes.features);
-      setSites(sitesRes.sites);
-      setAuditLogs(auditRes.audit_logs);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't load triage data.");
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
+  const setSelectedAoi = useCallback((aoi: string | null) => {
+    setSelectedAoiState(aoi);
+    syncAoiToUrl(aoi);
+  }, []);
 
   const loadAuditLogs = useCallback(async () => {
     setAuditLoading(true);
@@ -47,16 +59,40 @@ export function useDashboard() {
     }
   }, [token]);
 
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [aoisRes, alertsRes, sitesRes, auditRes] = await Promise.all([
+        api.getAois(token ?? ""),
+        api.getAlerts(token ?? "", selectedAoi),
+        api.getSites(token ?? "", selectedAoi),
+        api.getAuditLogs(token ?? ""),
+      ]);
+      setAois(aoisRes.aois);
+      setAlerts(alertsRes.features);
+      setSites(sitesRes.sites);
+      setAuditLogs(auditRes.audit_logs);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't load triage data.");
+    } finally {
+      setLoading(false);
+    }
+  }, [token, selectedAoi]);
+
   useEffect(() => {
     let ignore = false;
     (async () => {
+      setLoading(true);
       try {
-        const [alertsRes, sitesRes, auditRes] = await Promise.all([
-          api.getAlerts(token ?? ""),
-          api.getSites(token ?? ""),
+        const [aoisRes, alertsRes, sitesRes, auditRes] = await Promise.all([
+          api.getAois(token ?? ""),
+          api.getAlerts(token ?? "", selectedAoi),
+          api.getSites(token ?? "", selectedAoi),
           api.getAuditLogs(token ?? ""),
         ]);
         if (ignore) return;
+        setAois(aoisRes.aois);
         setAlerts(alertsRes.features);
         setSites(sitesRes.sites);
         setAuditLogs(auditRes.audit_logs);
@@ -71,7 +107,12 @@ export function useDashboard() {
     return () => {
       ignore = true;
     };
-  }, [token]);
+  }, [token, selectedAoi]);
+
+  const currentAoi = useMemo(
+    () => aois.find((a) => a.id === selectedAoi) ?? null,
+    [aois, selectedAoi]
+  );
 
   const alertsById = useMemo(() => {
     const map = new Map<number, AlertFeature>();
@@ -115,6 +156,10 @@ export function useDashboard() {
   }
 
   return {
+    aois,
+    selectedAoi,
+    setSelectedAoi,
+    currentAoi,
     alerts,
     sites,
     auditLogs,

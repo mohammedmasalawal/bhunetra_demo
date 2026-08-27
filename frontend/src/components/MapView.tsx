@@ -13,14 +13,16 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import type { LatLngBoundsExpression, LatLngTuple } from "leaflet";
-import type { AlertFeature, LeaseFeature, Site } from "@/lib/types";
+import type { AlertFeature, Aoi, LeaseFeature, Site } from "@/lib/types";
 import { polygonToLatLngs, polygonCentroid, formatCoordinates, copyCoordinatesToClipboard } from "@/lib/geo";
 import { formatArea, formatPercent, formatScore, legalityMeta } from "@/lib/format";
 import { LayersIcon, CopyIcon, CheckIcon, CrosshairIcon, InfoIcon } from "./icons";
 
 
 
-const DEFAULT_CENTER: LatLngTuple = [18.6585, 81.2305]; // Bailadila AOI center
+// Pre-fit view only -- FitBounds immediately reframes to the actual data.
+// [22, 79] ≈ geographic centre of India for the "All Regions" view.
+const NATIONAL_CENTER: LatLngTuple = [22.0, 79.0];
 
 type BaseMapType = "satellite" | "osm" | "dark";
 
@@ -85,6 +87,8 @@ export default function MapView({
   selectedAlertId,
   onSelectSite,
   onSelectAlert,
+  region = null,
+  allRegions = [],
 }: {
   alerts: AlertFeature[];
   sites: Site[];
@@ -93,7 +97,24 @@ export default function MapView({
   selectedAlertId: number | null;
   onSelectSite: (id: number) => void;
   onSelectAlert: (id: number) => void;
+  region?: Aoi | null;
+  allRegions?: Aoi[];
 }) {
+  const mapCenter: LatLngTuple =
+    region && region.center.lat != null && region.center.lon != null
+      ? [region.center.lat, region.center.lon]
+      : NATIONAL_CENTER;
+  const regionLabel = region
+    ? [region.name, region.district, region.state].filter(Boolean).join(" · ")
+    : (() => {
+        const states = new Set(
+          allRegions.filter((a) => a.alert_count > 0 && a.state).map((a) => a.state)
+        );
+        const siteTotal = allRegions.reduce((n, a) => n + a.site_count, 0);
+        return states.size
+          ? `All Regions — ${siteTotal} site${siteTotal === 1 ? "" : "s"} across ${states.size} state${states.size === 1 ? "" : "s"}`
+          : "All Regions";
+      })();
   const [basemap, setBasemap] = useState<BaseMapType>("satellite");
   const [showLabels, setShowLabels] = useState(true);
   const [showLeases, setShowLeases] = useState(true);
@@ -102,8 +123,8 @@ export default function MapView({
   const [showLayersMenu, setShowLayersMenu] = useState(false);
 
   const [cursorCoords, setCursorCoords] = useState<{ lat: number; lon: number; zoom: number }>({
-    lat: DEFAULT_CENTER[0],
-    lon: DEFAULT_CENTER[1],
+    lat: mapCenter[0],
+    lon: mapCenter[1],
     zoom: 13,
   });
   const [copiedCoord, setCopiedCoord] = useState(false);
@@ -159,19 +180,21 @@ export default function MapView({
       <div className="absolute top-3 left-14 z-[1000] flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface/90 backdrop-blur-md border border-border shadow-md pointer-events-auto">
         <span className="text-accent text-xs">📍</span>
         <div className="font-display text-xs flex items-center gap-1.5 flex-wrap">
-          <span className="font-bold text-text">Bailadila AOI-07</span>
-          <span className="text-text-muted">&middot;</span>
-          <span className="text-text font-medium">Dantewada District</span>
-          <span className="text-text-muted">&middot;</span>
-          <span className="px-1.5 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-bold uppercase tracking-wider">
-            Chhattisgarh State
-          </span>
+          <span className="font-bold text-text">{regionLabel}</span>
+          {region?.mineral && (
+            <>
+              <span className="text-text-muted">&middot;</span>
+              <span className="px-1.5 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-bold uppercase tracking-wider">
+                {region.mineral}
+              </span>
+            </>
+          )}
         </div>
       </div>
 
       <MapContainer
-        center={DEFAULT_CENTER}
-        zoom={14}
+        center={mapCenter}
+        zoom={region ? 13 : 5}
 
         maxZoom={19}
         minZoom={4}
@@ -289,7 +312,7 @@ export default function MapView({
                     </div>
                     <div className="text-[10px] text-text-muted flex items-center gap-1">
                       <span>📍</span>
-                      <span>Dantewada, Chhattisgarh</span>
+                      <span>{formatCoordinates(site.centroid.lat, site.centroid.lon, 4)}</span>
                     </div>
                     <div className="text-[10px] text-text-faint font-mono">
                       {formatCoordinates(site.centroid.lat, site.centroid.lon, 4)}
@@ -380,7 +403,7 @@ export default function MapView({
                       </div>
                       <div className="text-[10px] text-text-faint pt-1 border-t border-border/40 flex items-center gap-1">
                         <span>📍</span>
-                        <span>Dantewada District, Chhattisgarh</span>
+                        <span>{p.site_id ?? "—"}</span>
                       </div>
                     </div>
 

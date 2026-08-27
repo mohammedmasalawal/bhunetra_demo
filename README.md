@@ -46,6 +46,43 @@ python3 pipeline/detection.py            # runs detection, writes output/trigger
 python3 pipeline/validate.py             # prints Precision/Recall/F1
 ```
 
+## Multi-region: onboarding a new mining region
+
+Every region the system monitors is one entry in `pipeline/aois.py` (the
+AOI registry) and one row in the `aois` DB table. No code changes.
+
+1. **Add the region to `pipeline/aois.py`** — `name`, `state`, `district`,
+   `mineral`, a tight `bbox` (west/south/east/north, EPSG:4326, keep it
+   snug around the pit cluster — cost scales with area), `center`, and
+   either a `lease_file` path + `lease_boundary_valid: True`, or
+   `lease_file: None` + `lease_boundary_valid: False` (every trigger then
+   comes back `boundary_unknown`).
+2. **Sync the DB**: `python db/seed_aois.py` (needs `DATABASE_URL`).
+   `GET /api/v1/aois` now lists it; the frontend region selector shows it
+   with a zero count.
+3. **Seed a "before" baseline** (only for the live monitor): put
+   `before_red.tif` / `before_nir.tif` / `before_vv.tif` (+ optional
+   `before_blue.tif`, `before_ntl.tif`) under
+   `real_data_<aoi_id_lower_snake>/` — one historical Sentinel scene for
+   that bbox. `pipeline/download_sentinel.py` with `BHUNETRA_AOI=<id>` set
+   fetches these.
+4. **First run**: `python pipeline/live_monitor.py --aoi <id>` (add
+   `--live` to ingest). Downloads the latest Sentinel-2/1 scene for the
+   bbox, runs the real NDVI+SAR detection, ingests real triggers.
+5. **Automate**: add `<id>` to the `matrix.aoi` list in
+   `.github/workflows/live-monitor.yml`. The daily cron then monitors it
+   (no-op most days, real work every ~5 days on a new pass).
+
+Rough cost: ~15–30 min of config for a region without a real lease
+polygon; a couple of hours if you need to source/trace the official
+boundary. Compute per cycle is ~5–15 min and free (CDSE + GitHub Actions
+free tiers).
+
+Every pipeline entry point takes `--aoi <id>` (`detection.py`,
+`score_triggers.py`, `seed_backend.py`, `live_monitor.py`);
+`AOI-07-BAILADILA` stays the default so existing invocations are
+unchanged.
+
 ## Swapping in REAL Sentinel-2 data
 1. Download Sentinel-2 L2A imagery for your demo site, two dates (before/after).
 2. Extract Band 4 (Red) and Band 8 (NIR) as GeoTIFFs for each date.

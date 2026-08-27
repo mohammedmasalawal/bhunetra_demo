@@ -8,6 +8,7 @@ import { useDashboard } from "@/lib/useDashboard";
 import * as api from "@/lib/api";
 import type { AlertFeature, AlertStatus, LeaseFeature } from "@/lib/types";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { RegionSelect } from "@/components/RegionSelect";
 import { AuditLogModal } from "@/components/AuditLogModal";
 import { SlaCountdown } from "@/components/SlaCountdown";
 import { ImageryViewer } from "@/components/ImageryViewer";
@@ -43,6 +44,10 @@ export default function DgmDashboardPage() {
   const { session, loading: authLoading, logout } = useAuth();
   const router = useRouter();
   const {
+    aois,
+    selectedAoi,
+    setSelectedAoi,
+    currentAoi,
     alerts,
     sites,
     auditLogs,
@@ -76,10 +81,10 @@ export default function DgmDashboardPage() {
   useEffect(() => {
     if (!session) return;
     api
-      .getLeases(session.token)
+      .getLeases(session.token, selectedAoi)
       .then((res) => setLeases(res.features))
       .catch(() => setLeases([]));
-  }, [session]);
+  }, [session, selectedAoi]);
 
   const allAlerts = useMemo(() => alerts ?? [], [alerts]);
 
@@ -260,6 +265,10 @@ export default function DgmDashboardPage() {
             <InfoIcon size={14} className="text-accent" />
             <span className="hidden md:inline">About</span>
           </Link>
+
+          {aois.length > 0 && (
+            <RegionSelect aois={aois} value={selectedAoi} onChange={setSelectedAoi} />
+          )}
 
           {session && (
             <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-raised border border-border text-xs">
@@ -523,6 +532,8 @@ export default function DgmDashboardPage() {
               selectedAlertId={selectedAlertId}
               onSelectAlert={(id) => setSelectedAlertId(id)}
               onSelectSite={() => {}}
+              region={currentAoi}
+              allRegions={aois}
             />
           </section>
         ) : selectedAlert ? (
@@ -543,7 +554,12 @@ export default function DgmDashboardPage() {
                     {selectedAlert.properties.location_name || "—"}
                   </h1>
                   <p className="text-xs text-text-muted mt-0.5">
-                    Spatial AOI: {selectedAlert.properties.site_id ?? "—"} &middot; Dantewada District, Chhattisgarh
+                    Spatial AOI: {selectedAlert.properties.site_id ?? "—"}
+                    {(() => {
+                      const r = aois.find((a) => a.id === selectedAlert.properties.site_id);
+                      const loc = r ? [r.district, r.state].filter(Boolean).join(", ") : "";
+                      return loc ? ` · ${loc}` : "";
+                    })()}
                   </p>
                 </div>
 

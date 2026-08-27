@@ -339,7 +339,7 @@ export default function AboutPage() {
             <span>&middot; Autonomous Mining Surveillance System</span>
           </div>
           <div>
-            <span>Bailadila Mining Sector &middot; Dantewada, Chhattisgarh</span>
+            <span>Multi-region satellite monitoring &middot; India</span>
           </div>
         </div>
       </footer>

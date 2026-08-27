@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { ThemeToggle } from "./ThemeToggle";
+import { RegionSelect } from "./RegionSelect";
 import { LogoutIcon, RefreshIcon, ClockIcon, TableIcon, ListIcon, InfoIcon, BuildingIcon } from "./icons";
 
 
 
-import type { DashboardViewMode } from "@/lib/types";
+import type { Aoi, DashboardViewMode } from "@/lib/types";
 
 const ROLE_LABEL: Record<string, string> = {
   FIELD_OFFICER: "Field Officer",
@@ -21,6 +22,9 @@ export function TopBar({
   onViewModeChange,
   onOpenAuditLogs,
   auditLogCount = 0,
+  aois = [],
+  selectedAoi = null,
+  onSelectAoi,
 }: {
   onRefresh: () => void;
   refreshing: boolean;
@@ -28,6 +32,9 @@ export function TopBar({
   onViewModeChange?: (mode: DashboardViewMode) => void;
   onOpenAuditLogs?: () => void;
   auditLogCount?: number;
+  aois?: Aoi[];
+  selectedAoi?: string | null;
+  onSelectAoi?: (aoi: string | null) => void;
 }) {
   const { session, logout } = useAuth();
 
@@ -46,6 +53,10 @@ export function TopBar({
           >
             {ROLE_LABEL[session.role] ?? session.role}
           </span>
+        )}
+
+        {onSelectAoi && aois.length > 0 && (
+          <RegionSelect aois={aois} value={selectedAoi} onChange={onSelectAoi} />
         )}
       </div>
 

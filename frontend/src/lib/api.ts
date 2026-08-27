@@ -1,5 +1,6 @@
 import type {
   AlertsResponse,
+  AoisResponse,
   BriefResponse,
   ActionResponse,
   AuditLogsResponse,
@@ -96,16 +97,24 @@ export function login(email: string, password: string) {
 }
 
 
-export function getAlerts(token: string) {
-  return request<AlertsResponse>("/api/v1/alerts", { token });
+function aoiQuery(aoi?: string | null) {
+  return aoi ? `?aoi=${encodeURIComponent(aoi)}` : "";
 }
 
-export function getSites(token: string) {
-  return request<SitesResponse>("/api/v1/sites", { token });
+export function getAois(token: string) {
+  return request<AoisResponse>("/api/v1/aois", { token });
 }
 
-export function getLeases(token: string) {
-  return request<LeasesResponse>("/api/v1/leases", { token });
+export function getAlerts(token: string, aoi?: string | null) {
+  return request<AlertsResponse>(`/api/v1/alerts${aoiQuery(aoi)}`, { token });
+}
+
+export function getSites(token: string, aoi?: string | null) {
+  return request<SitesResponse>(`/api/v1/sites${aoiQuery(aoi)}`, { token });
+}
+
+export function getLeases(token: string, aoi?: string | null) {
+  return request<LeasesResponse>(`/api/v1/leases${aoiQuery(aoi)}`, { token });
 }
 
 export function generateBrief(alertId: number, token: string) {

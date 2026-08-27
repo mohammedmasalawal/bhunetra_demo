@@ -43,6 +43,14 @@ permissions:
 jobs:
   live-monitor:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # One monitoring run per AOI. Add an id here after adding it to
+        # pipeline/aois.py + running db/seed_aois.py. Only AOIs whose
+        # first baseline scene has been seeded should be listed.
+        aoi:
+          - AOI-07-BAILADILA
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
@@ -55,18 +63,19 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-pipeline.txt
 
-      - name: Run live monitor
+      - name: Run live monitor (${{ matrix.aoi }})
         env:
           CDSE_CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
           CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
           EARTHDATA_TOKEN: ${{ secrets.EARTHDATA_TOKEN }}
-        run: python pipeline/live_monitor.py
+        run: python pipeline/live_monitor.py --aoi ${{ matrix.aoi }}
 
       - name: Commit updated state + any new triggers/imagery
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add real_data_live/ output/triggers_live.json
+          git pull --rebase --autostash || true
+          git add real_data*/ output/triggers*_live.json output/triggers_live.json
           git diff --staged --quiet && echo "Nothing new to commit" && exit 0
-          git commit -m "Live monitor: new scene processed [skip ci]"
+          git commit -m "Live monitor (${{ matrix.aoi }}): new scene processed [skip ci]"
           git push

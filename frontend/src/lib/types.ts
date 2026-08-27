@@ -140,6 +140,24 @@ export interface ImageryManifest {
   bands: ImageryBand[];
 }
 
+export interface Aoi {
+  id: string;
+  name: string;
+  state: string | null;
+  district: string | null;
+  mineral: string | null;
+  center: { lat: number | null; lon: number | null };
+  bbox: { west: number; south: number; east: number; north: number } | null;
+  has_imagery: boolean;
+  alert_count: number;
+  site_count: number;
+  escalated_count: number;
+}
+
+export interface AoisResponse {
+  aois: Aoi[];
+}
+
 export type DashboardViewMode = "sites" | "triggers" | "map";
 
 export interface LeaseFeature {

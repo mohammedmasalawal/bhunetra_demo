@@ -23,6 +23,10 @@ export default function DashboardPage() {
   const { session, loading: authLoading } = useAuth();
   const router = useRouter();
   const {
+    aois,
+    selectedAoi,
+    setSelectedAoi,
+    currentAoi,
     alerts,
     sites,
     auditLogs,
@@ -50,10 +54,10 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!session) return;
     api
-      .getLeases(session.token)
+      .getLeases(session.token, selectedAoi)
       .then((res) => setLeases(res.features))
       .catch(() => setLeases([])); // lease overlay is a nice-to-have, never blocks triage
-  }, [session]);
+  }, [session, selectedAoi]);
 
   const sitesList = useMemo(() => sites ?? [], [sites]);
   const alertsList = useMemo(() => alerts ?? [], [alerts]);
@@ -147,6 +151,9 @@ export default function DashboardPage() {
         onViewModeChange={setViewMode}
         onOpenAuditLogs={() => setAuditModalOpen(true)}
         auditLogCount={auditLogs.length}
+        aois={aois}
+        selectedAoi={selectedAoi}
+        onSelectAoi={setSelectedAoi}
       />
 
       {/* Desktop Layout */}
@@ -196,6 +203,8 @@ export default function DashboardPage() {
                 selectedAlertId={selectedAlertId}
                 onSelectSite={handleSelectSite}
                 onSelectAlert={handleSelectAlert}
+                region={currentAoi}
+                allRegions={aois}
               />
             </div>
             <div className="w-[380px] lg:w-[430px] shrink-0 border-l border-border bg-bg overflow-hidden">
