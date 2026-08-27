@@ -118,6 +118,27 @@ class Alert(Base):
     # PostGIS Spatial Column
     geometry = Column(Geometry(geometry_type='POLYGON', srid=4326))
 
+
+class Aoi(Base):
+    """A monitored mining region (Area Of Interest). One row per region the
+    pipeline watches. Alert.site_id references Aoi.id. Kept in sync with
+    pipeline/aois.py (same source data) -- db/seed_aois.py upserts from it."""
+    __tablename__ = "aois"
+    id          = Column(String, primary_key=True)   # e.g. "AOI-07-BAILADILA"
+    name        = Column(String, nullable=False)     # "Bailadila Iron Ore Complex"
+    state       = Column(String)
+    district    = Column(String)
+    mineral     = Column(String)
+    center_lat  = Column(Float)
+    center_lon  = Column(Float)
+    bbox_w      = Column(Float, nullable=True)
+    bbox_s      = Column(Float, nullable=True)
+    bbox_e      = Column(Float, nullable=True)
+    bbox_n      = Column(Float, nullable=True)
+    has_imagery = Column(Integer, default=0)
+    lease_source = Column(String, nullable=True)
+
+
 # Create tables in Railway if they don't exist
 Base.metadata.create_all(bind=engine)
 
@@ -411,10 +432,14 @@ def ingest_trigger(payload: TriggerPayload, db: Session = Depends(get_db)):
 
 
 @app.get("/api/v1/alerts")
-def get_alerts(db: Session = Depends(get_db)):
-    """Pair C (Frontend) uses this to populate the Next.js/Leaflet map."""
+def get_alerts(aoi: str | None = None, db: Session = Depends(get_db)):
+    """Pair C (Frontend) uses this to populate the Next.js/Leaflet map.
+    Optional ?aoi=<id> narrows to one region (matches Alert.site_id)."""
 
-    alerts = db.query(Alert).all()
+    query = db.query(Alert)
+    if aoi:
+        query = query.filter(Alert.site_id == aoi)
+    alerts = query.all()
     feature_collection = {"type": "FeatureCollection", "features": []}
 
     for alert in alerts:
@@ -449,6 +474,42 @@ def get_alerts(db: Session = Depends(get_db)):
         feature_collection["features"].append(feature)
 
     return feature_collection
+
+
+@app.get("/api/v1/aois")
+def get_aois(db: Session = Depends(get_db)):
+    """The registry of monitored mining regions, each with live alert
+    counts. The frontend region selector renders this. Regions with no
+    alerts yet (just onboarded) still appear, with zero counts."""
+    aois = db.query(Aoi).all()
+    alerts = db.query(Alert).all()
+
+    by_site: Dict[str, list] = {}
+    for a in alerts:
+        by_site.setdefault(a.site_id or "", []).append(a)
+
+    out = []
+    for r in aois:
+        members = by_site.get(r.id, [])
+        clusters = {m.cluster_id for m in members if m.cluster_id is not None}
+        out.append({
+            "id": r.id,
+            "name": r.name,
+            "state": r.state,
+            "district": r.district,
+            "mineral": r.mineral,
+            "center": {"lat": r.center_lat, "lon": r.center_lon},
+            "bbox": (
+                {"west": r.bbox_w, "south": r.bbox_s, "east": r.bbox_e, "north": r.bbox_n}
+                if r.bbox_w is not None else None
+            ),
+            "has_imagery": bool(r.has_imagery),
+            "alert_count": len(members),
+            "site_count": len(clusters),
+            "escalated_count": sum(1 for m in members if m.status == "ESCALATED_DGM"),
+        })
+    out.sort(key=lambda x: x["name"])
+    return {"aois": out}
 
 
 # ==========================================
@@ -562,43 +623,6 @@ def get_alert_imagery(alert_id: int, db: Session = Depends(get_db)):
         "alert_id": alert.id,
         "aoi": alert.site_id,
         "bands": IMAGERY_BY_AOI.get(alert.site_id or "", []),
-    }
-
-
-@app.post("/api/v1/admin/cleanup-data")
-def admin_cleanup_data(
-    db: Session = Depends(get_db),
-    officer=Depends(get_current_officer),
-):
-    """One-shot production data cleanup, mirrors db/cleanup_data.py. Removes
-    orphan alerts (trigger_id IS NULL) + their audit rows and fixes the
-    AOI-07-BALAGHAT -> AOI-07-BAILADILA site_id typo. Idempotent. Requires a
-    valid session token. TODO: remove once run."""
-    orphan_ids = [r[0] for r in db.execute(
-        text("SELECT id FROM alerts WHERE trigger_id IS NULL")
-    )]
-    deleted_audit = 0
-    deleted_alerts = 0
-    if orphan_ids:
-        deleted_audit = db.execute(
-            text("DELETE FROM audit_logs WHERE alert_id = ANY(:ids)"),
-            {"ids": orphan_ids},
-        ).rowcount
-        deleted_alerts = db.execute(
-            text("DELETE FROM alerts WHERE id = ANY(:ids)"),
-            {"ids": orphan_ids},
-        ).rowcount
-    fixed_site_id = db.execute(text(
-        "UPDATE alerts SET site_id = 'AOI-07-BAILADILA' "
-        "WHERE site_id = 'AOI-07-BALAGHAT'"
-    )).rowcount
-    db.commit()
-    return {
-        "status": "success",
-        "orphan_alert_ids": orphan_ids,
-        "deleted_audit_logs": deleted_audit,
-        "deleted_alerts": deleted_alerts,
-        "site_id_fixed": fixed_site_id,
     }
 
 
@@ -825,24 +849,36 @@ def update_alert_sla(
 
 
 @app.get("/api/v1/leases")
-def get_lease_boundaries(db: Session = Depends(get_db)):
+def get_lease_boundaries(aoi: str | None = None, db: Session = Depends(get_db)):
     """Pair C (Frontend) uses this to draw legal lease-boundary polygons on
     the map. Restored after it was dropped in the widened-schema rewrite —
     it's independent of the trigger/alert legality work (that now lives in
     TriggerPayload.legality_assessment instead of the old inline
-    run_legal_check()/legal_status columns, which stay removed)."""
+    run_legal_check()/legal_status columns, which stay removed).
 
-    leases = db.execute(text("""
-        SELECT
-            id,
-            source,
-            lessee_name,
-            mineral_type,
-            status,
-            ST_AsGeoJSON(geometry) as geom_json
+    Optional ?aoi=<id>: leases carry no site_id, so this narrows by the
+    AOI's state/district. An AOI with neither set returns all leases."""
+
+    sql = """
+        SELECT id, source, lessee_name, mineral_type, status, state, district,
+               ST_AsGeoJSON(geometry) as geom_json
         FROM leases
-        LIMIT 500;
-    """)).fetchall()
+    """
+    params: Dict[str, Any] = {}
+    if aoi:
+        region = db.query(Aoi).filter(Aoi.id == aoi).first()
+        if region and (region.state or region.district):
+            clauses = []
+            if region.state:
+                clauses.append("state = :state")
+                params["state"] = region.state
+            if region.district:
+                clauses.append("district = :district")
+                params["district"] = region.district
+            sql += " WHERE " + " AND ".join(clauses)
+    sql += " LIMIT 500;"
+
+    leases = db.execute(text(sql), params).fetchall()
 
     feature_collection = {"type": "FeatureCollection", "features": []}
 
@@ -883,13 +919,16 @@ def site_legality_flag(members: list) -> str:
 
 
 @app.get("/api/v1/sites")
-def get_sites(db: Session = Depends(get_db)):
+def get_sites(aoi: str | None = None, db: Session = Depends(get_db)):
     """Groups alerts into physical mining sites by cluster_id (computed
     offline by db/cluster_sites.py -- see that script for why DBSCAN and
     why eps=400m). Alerts that haven't been clustered yet (cluster_id is
     still NULL) are excluded rather than shown as a misleading site of
-    their own."""
-    alerts = db.query(Alert).filter(Alert.cluster_id.isnot(None)).all()
+    their own. Optional ?aoi=<id> narrows to one region."""
+    query = db.query(Alert).filter(Alert.cluster_id.isnot(None))
+    if aoi:
+        query = query.filter(Alert.site_id == aoi)
+    alerts = query.all()
 
     clusters: Dict[int, list] = {}
     for alert in alerts:
