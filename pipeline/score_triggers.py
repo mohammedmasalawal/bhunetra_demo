@@ -29,9 +29,18 @@ import rasterio
 from dateutil.parser import parse as parse_date
 from shapely.geometry import Point
 
+try:
+    from aois import data_dir as _aoi_data_dir, get_aoi, DEFAULT_AOI
+except ImportError:
+    from pipeline.aois import data_dir as _aoi_data_dir, get_aoi, DEFAULT_AOI
+
 
 TRIGGERS_FILE = "output/triggers.json"
 OUTPUT_FILE   = "output/triggers_scored.json"
+
+# All the per-AOI input rasters/vectors live under one directory. Defaults
+# to "real_data" (Bailadila); set_data_dir() / --aoi repoints them.
+DATA_DIR      = "real_data"
 PERMITS_FILE  = "real_data/mock_permits.json"
 ROADS_FILE    = "real_data/roads.geojson"
 
@@ -48,6 +57,29 @@ AFTER_SWIR_FILE = "real_data/after_swir.tif"
 
 BEFORE_NTL_FILE = "real_data/before_ntl.tif"
 AFTER_NTL_FILE  = "real_data/after_ntl.tif"
+
+
+def set_data_dir(d: str):
+    """Repoint every input raster/vector path at directory `d`."""
+    global DATA_DIR, PERMITS_FILE, ROADS_FILE, BEFORE_VV_FILE, AFTER_VV_FILE
+    global AFTER_RED_FILE, AFTER_NIR_FILE, AFTER_BLUE_FILE, AFTER_SWIR_FILE
+    global BEFORE_NTL_FILE, AFTER_NTL_FILE
+    DATA_DIR = d
+    PERMITS_FILE   = f"{d}/mock_permits.json"
+    ROADS_FILE     = f"{d}/roads.geojson"
+    BEFORE_VV_FILE = f"{d}/before_vv.tif"
+    AFTER_VV_FILE  = f"{d}/after_vv.tif"
+    AFTER_RED_FILE = f"{d}/after_red.tif"
+    AFTER_NIR_FILE = f"{d}/after_nir.tif"
+    AFTER_BLUE_FILE = f"{d}/after_blue.tif"
+    AFTER_SWIR_FILE = f"{d}/after_swir.tif"
+    BEFORE_NTL_FILE = f"{d}/before_ntl.tif"
+    AFTER_NTL_FILE  = f"{d}/after_ntl.tif"
+
+
+def set_aoi(aoi_id: str):
+    get_aoi(aoi_id)  # validate
+    set_data_dir(_aoi_data_dir(aoi_id))
 
 # The AFTER scene's actual acquisition date, as resolved by
 # download_sentinel.py for this site (printed there as "after: using scene
@@ -449,6 +481,22 @@ def score_triggers(triggers):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser(description="BhuNetra trigger scoring / signal fusion")
+    ap.add_argument("--aoi", default=DEFAULT_AOI,
+                    help=f"AOI id from pipeline/aois.py (default: {DEFAULT_AOI})")
+    ap.add_argument("--in", dest="in_file", default=None, help="input triggers JSON")
+    ap.add_argument("--out", dest="out_file", default=None, help="output scored JSON")
+    args = ap.parse_args()
+
+    global TRIGGERS_FILE, OUTPUT_FILE
+    if args.aoi != DEFAULT_AOI:
+        set_aoi(args.aoi)
+    if args.in_file:
+        TRIGGERS_FILE = args.in_file
+    if args.out_file:
+        OUTPUT_FILE = args.out_file
+
     triggers = load_triggers()
     scored = score_triggers(triggers)
 

@@ -122,6 +122,13 @@ import detection as d
 import score_triggers as st
 import seed_backend as sb
 
+try:
+    from aois import get_aoi, data_dir, DEFAULT_AOI
+except ImportError:
+    from pipeline.aois import get_aoi, data_dir, DEFAULT_AOI
+
+# --- per-AOI paths (defaults = Bailadila; _configure_for_aoi() repoints) --
+AOI_ID = DEFAULT_AOI
 STATE_FILE = Path("real_data_live/state.json")
 LIVE_DIR = Path("real_data_live")
 OUTPUT_FILE = Path("output/triggers_live.json")
@@ -131,6 +138,35 @@ NTL_DIR = Path("real_data_live/ntl")
 # anchor, not something that needs (or should) refresh.
 NTL_BEFORE_FILE = "real_data/before_ntl.tif"
 NTL_BEFORE_YEAR = 2020
+
+
+def _configure_for_aoi(aoi_id: str):
+    """Point every per-AOI path at `aoi_id`'s working dir and repoint the
+    download_sentinel bbox. AOI-07-BAILADILA keeps its historical
+    real_data_live/ layout so nothing that already exists breaks; other
+    AOIs get real_data_<aoi>_live/. Their first run needs a
+    real_data_<aoi>/before_*.tif baseline seeded (same idea as the lease
+    file) -- see README 'Onboarding a new region'."""
+    global AOI_ID, STATE_FILE, LIVE_DIR, OUTPUT_FILE, NTL_DIR
+    global NTL_BEFORE_FILE, BOOTSTRAP_BASELINE
+    AOI_ID = aoi_id
+    ds.set_aoi(aoi_id)
+    if aoi_id == DEFAULT_AOI:
+        return
+    base = data_dir(aoi_id)                 # e.g. real_data_aoi_korba_coalfield
+    live = f"{base}_live"
+    LIVE_DIR = Path(live)
+    STATE_FILE = Path(f"{live}/state.json")
+    NTL_DIR = Path(f"{live}/ntl")
+    OUTPUT_FILE = Path(f"output/triggers_{aoi_id.lower().replace('-', '_')}_live.json")
+    NTL_BEFORE_FILE = f"{base}/before_ntl.tif"
+    BOOTSTRAP_BASELINE = {
+        "red": f"{base}/before_red.tif",
+        "nir": f"{base}/before_nir.tif",
+        "blue": f"{base}/before_blue.tif",
+        "vv": f"{base}/before_vv.tif",
+        "date": "2020-01-05",
+    }
 
 # How far back to look for a scene on the very first run (before any state
 # exists) -- generous, since we don't know the last real capture date yet.
@@ -288,11 +324,13 @@ def download_optical_and_sar(connection, scene_date, out_dir, prev_scene_date):
 
 
 def run_ndvi_detection(before_paths, after_paths):
+    # Pull SITE_ID / LEASE_FILE / lease-validity from the AOI registry,
+    # then override only the band paths with this cycle's downloads.
+    d.set_aoi(AOI_ID)
     d.BEFORE_RED = str(before_paths["red"])
     d.BEFORE_NIR = str(before_paths["nir"])
     d.AFTER_RED = str(after_paths["red"])
     d.AFTER_NIR = str(after_paths["nir"])
-    d.LEASE_FILE = "real_data/lease_boundary.geojson"
     return d.run_detection()
 
 
@@ -438,7 +476,16 @@ def main():
                               "first) -- e.g. for a small, low-footprint --live test instead "
                               "of ingesting a full batch. Applies to the local file too, not "
                               "just ingestion.")
+    parser.add_argument("--aoi", default=DEFAULT_AOI,
+                         help=f"Region id from pipeline/aois.py (default: {DEFAULT_AOI}).")
     args = parser.parse_args()
+
+    try:
+        get_aoi(args.aoi)
+    except KeyError as e:
+        raise SystemExit(str(e))
+    _configure_for_aoi(args.aoi)
+    print(f"AOI: {args.aoi}  |  state file: {STATE_FILE}  |  output: {OUTPUT_FILE}")
 
     load_dotenv()
     state = load_state()

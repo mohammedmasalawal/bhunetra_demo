@@ -31,7 +31,16 @@ import requests
 from dateutil.parser import parse as parse_date
 from dotenv import load_dotenv
 
+try:
+    from aois import get_aoi, data_dir, DEFAULT_AOI
+except ImportError:  # imported as a package (pipeline.download_sentinel)
+    from pipeline.aois import get_aoi, data_dir, DEFAULT_AOI
+
 # ---- config -------------------------------------------------------------
+# BBOX / MAX_CLOUD_COVER / OUTPUT_DIR default to the Bailadila AOI so old
+# callers keep working unchanged; set_aoi() repoints them for any other
+# region from the pipeline/aois.py registry. Entry points call set_aoi()
+# (or the BHUNETRA_AOI env var, honoured at import) before downloading.
 BBOX = {"west": 81.22, "south": 18.65, "east": 81.245, "north": 18.67}
 # Actual pixel size (degrees) of the 10m bands (B02/B04/B08) once reprojected
 # to EPSG:4326 at this bbox/latitude -- measured from a downloaded band's
@@ -46,6 +55,24 @@ OPENEO_BACKEND = "https://openeo.dataspace.copernicus.eu"
 COLLECTION     = "SENTINEL2_L2A"
 S1_COLLECTION  = "SENTINEL1_GRD"
 OUTPUT_DIR     = Path("real_data")
+
+CURRENT_AOI = DEFAULT_AOI
+
+
+def set_aoi(aoi_id: str) -> dict:
+    """Repoint BBOX / MAX_CLOUD_COVER / OUTPUT_DIR at another region from
+    the pipeline/aois.py registry. Returns the AOI config dict."""
+    global BBOX, MAX_CLOUD_COVER, OUTPUT_DIR, CURRENT_AOI
+    cfg = get_aoi(aoi_id)
+    BBOX = dict(cfg["bbox"])
+    MAX_CLOUD_COVER = cfg.get("max_cloud_cover", MAX_CLOUD_COVER)
+    OUTPUT_DIR = Path(data_dir(aoi_id))
+    CURRENT_AOI = aoi_id
+    return cfg
+
+
+if os.getenv("BHUNETRA_AOI") and os.getenv("BHUNETRA_AOI") != DEFAULT_AOI:
+    set_aoi(os.environ["BHUNETRA_AOI"])
 
 # CDSE's public product catalog (OData) -- read-only metadata search, no
 # auth, no pixel data. Used only to discover which sat:orbit_state /

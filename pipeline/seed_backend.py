@@ -45,11 +45,23 @@ import sys
 
 import requests
 
+try:
+    from aois import AOIS, get_aoi, DEFAULT_AOI
+except ImportError:
+    from pipeline.aois import AOIS, get_aoi, DEFAULT_AOI
+
 TRIGGERS_FILE = "output/triggers_scored.json"
 API_BASE_URL = "https://bhunetra-demo-rosy.vercel.app"
 TRIGGERS_ENDPOINT = f"{API_BASE_URL}/api/v1/triggers"
 
+# Fallback display label; per-trigger label is looked up from the AOI
+# registry by the trigger's own site_id in build_payload().
 SITE_LABEL = "Bailadila AOI-07"
+
+
+def _label_for(site_id):
+    cfg = AOIS.get(site_id)
+    return cfg["name"] if cfg else SITE_LABEL
 RISK_SCORE_SCALE = 100  # confidence_score (0-1) * this -> matches live sample data's 0-100 convention
 
 # Same local-latitude degree-to-meter approximation used elsewhere in this
@@ -80,7 +92,7 @@ def build_payload(trigger):
     risk_basis = trigger["confidence_score"] if trigger["confidence_score"] is not None \
         else trigger["change_pct"] / 100
     return {
-        "location_name": f"{SITE_LABEL} — {trigger['trigger_id']}",
+        "location_name": f"{_label_for(trigger.get('site_id'))} — {trigger['trigger_id']}",
         "risk_score": round(risk_basis * RISK_SCORE_SCALE, 1),
         "geojson_polygon": square_polygon(trigger["lat"], trigger["lon"]),
         "trigger_id": trigger["trigger_id"],
@@ -105,9 +117,21 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true",
                          help="Actually POST to the backend. Without this flag, dry-run only.")
+    parser.add_argument("--triggers", default=TRIGGERS_FILE,
+                         help=f"scored-triggers JSON to ingest (default: {TRIGGERS_FILE})")
+    parser.add_argument("--aoi", default=None,
+                         help="Optional: validate every trigger's site_id belongs to this "
+                              "AOI id from pipeline/aois.py before sending.")
     args = parser.parse_args()
 
-    triggers = json.load(open(TRIGGERS_FILE))
+    if args.aoi:
+        get_aoi(args.aoi)  # raises on unknown id
+
+    triggers = json.load(open(args.triggers))
+    if args.aoi:
+        wrong = {t.get("site_id") for t in triggers} - {args.aoi}
+        if wrong:
+            raise SystemExit(f"{args.triggers} contains triggers for {wrong}, not {args.aoi}")
     payloads = [build_payload(t) for t in triggers]
 
     if not args.live:
