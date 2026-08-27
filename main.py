@@ -142,6 +142,55 @@ class Aoi(Base):
 # Create tables in Railway if they don't exist
 Base.metadata.create_all(bind=engine)
 
+
+# The AOI registry. MUST stay identical to pipeline/aois.py AOIS (the
+# pipeline can't be imported here -- it's .vercelignore'd out of the API
+# bundle -- so the shared fields are duplicated, same pattern as
+# DEMO_OFFICERS). seed_aois() upserts these on startup so a fresh deploy
+# has its regions without a manual db/seed_aois.py run.
+AOI_SEED = [
+    dict(id="AOI-07-BAILADILA", name="Bailadila Iron Ore Complex", state="Chhattisgarh",
+         district="Dantewada", mineral="Iron Ore", center_lat=18.6585, center_lon=81.2305,
+         bbox_w=81.22, bbox_s=18.65, bbox_e=81.245, bbox_n=18.67, has_imagery=1,
+         lease_source="hand-traced"),
+    dict(id="AOI-BELLARY-SANDUR", name="Sandur-Hospet Iron Ore Belt", state="Karnataka",
+         district="Ballari", mineral="Iron Ore", center_lat=15.10, center_lon=76.58,
+         bbox_w=76.53, bbox_s=15.05, bbox_e=76.63, bbox_n=15.15, has_imagery=0,
+         lease_source=None),
+    dict(id="AOI-KEONJHAR-JODA", name="Joda-Barbil Iron & Manganese Belt", state="Odisha",
+         district="Keonjhar", mineral="Iron / Manganese", center_lat=22.03, center_lon=85.43,
+         bbox_w=85.38, bbox_s=21.98, bbox_e=85.48, bbox_n=22.08, has_imagery=0,
+         lease_source=None),
+    dict(id="AOI-KORBA-COALFIELD", name="Korba Coalfield", state="Chhattisgarh",
+         district="Korba", mineral="Coal", center_lat=22.38, center_lon=82.65,
+         bbox_w=82.58, bbox_s=22.33, bbox_e=82.72, bbox_n=22.44, has_imagery=0,
+         lease_source=None),
+    dict(id="AOI-JHARIA-COALFIELD", name="Jharia Coalfield", state="Jharkhand",
+         district="Dhanbad", mineral="Coal", center_lat=23.77, center_lon=86.43,
+         bbox_w=86.38, bbox_s=23.72, bbox_e=86.48, bbox_n=23.82, has_imagery=0,
+         lease_source=None),
+]
+
+
+def seed_aois():
+    """Idempotent upsert of AOI_SEED. Cheap enough to run every cold start."""
+    try:
+        db = SessionLocal()
+        existing = {a.id for a in db.query(Aoi.id).all()}
+        for row in AOI_SEED:
+            if row["id"] in existing:
+                db.query(Aoi).filter(Aoi.id == row["id"]).update(row)
+            else:
+                db.add(Aoi(**row))
+        db.commit()
+    except Exception as e:  # never block startup on this
+        print(f"[seed_aois] skipped: {e}")
+    finally:
+        db.close()
+
+
+seed_aois()
+
 # ==========================================
 # 3. PYDANTIC SCHEMAS (API Contracts)
 # ==========================================

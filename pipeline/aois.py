@@ -5,6 +5,10 @@ The single source of truth for every mining region the system monitors.
 Onboarding a new region is an entry here + a row in the `aois` table
 (db/seed_aois.py upserts from this same dict) -- no other code changes.
 
+NOTE: main.py's AOI_SEED duplicates the shared fields of these entries
+(the API bundle .vercelignore's out pipeline/, so it can't import this).
+Keep the two lists in agreement when adding a region.
+
 Each entry:
     name                 human label shown in the UI
     state, district      administrative location
